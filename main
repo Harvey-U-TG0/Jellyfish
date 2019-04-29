@@ -1,0 +1,381 @@
+#define PI 3.1415926535897932384626433832795
+
+//Setup Variables
+int mode = 0; //There are three modes, 
+//mode 0 = 0, (yellow), This is the main base (0) located at the origin.
+//mode 1 = 1, (Red), This is the secondary base (1) located at y = 0, x = base_spearation
+//mode 2 = 2 (Green), This is the third base (2) located at y = sin(60)*base_separation, x = base_spearation/2
+
+
+
+//Coordinate variables
+float currentXCord = 0; //The initial cordinate of the jelly fish
+float currentYCord = 10;
+float currentZCord = 0;
+
+float newXCord = 1000; //The new cordinate the jelly fish wants to move to
+float newYCord = 0;
+float newZCord = 0;
+
+float xStepSpacing; //distance between each segment of the certain journey
+float yStepSpacing; 
+float zStepSpacing; 
+
+float stepCount = 10; //This is the number of segments the journey will be split into
+
+float xJourneyCords[11]; //Stores the series of coordinates for the journey, Length = 1 + stepCount
+float yJourneyCords[11];
+float zJourneyCords[11];
+
+float xBase = 0;//Coordinates of the base
+float yBase = 0;
+float zbase = 0;
+
+float journeyLengths[11]; //Stores the length of each string for all the coordinates of a journey
+
+long stepPositions[11]; //Stores the motor position for all the coordinates of the journey
+
+
+
+
+//Hardware variables
+const int stepsInRev = 200*16; //Total number of steps in one revolution. 16 is the number of microsteps.
+const float gearRatio = 87/42; //The nuimber of times the small give turns every time the big gear turns once.
+const float spoolCircumference = PI * 186;
+
+
+
+//Electronics variables
+const int stepPin = 3;
+const int dirPin = 4;
+
+//LEDs
+const int yellowLed = 10;
+const int redLed = 11;
+const int greenLed = 12;
+
+//Mode inputs
+const int mode0Input = 7;//Depending on which one of these is high when the arduino is turned on will determine the base mode
+const int mode1Input = 8;
+const int mode2Input = 9;
+
+
+
+
+
+
+
+void setup() {
+  Serial.begin(9600);
+
+  //Setting up Pins
+  pinMode(3,OUTPUT);
+  pinMode(4,OUTPUT);
+  
+  pinMode(yellowLed, OUTPUT);
+  pinMode(redLed, OUTPUT);
+  pinMode(greenLed, OUTPUT);
+
+  pinMode(mode0Input, INPUT);
+  pinMode(mode1Input, INPUT);
+  pinMode(mode2Input, INPUT);
+
+  //Choose Mode
+  mode = chooseMode();
+
+
+  //If in mode 1 or 2 send out serial ready command 
+  if (mode == 1){
+    while(1==1){
+      Serial.write(1); //1 tells the main base that base 1 is ready for coordinates
+      flashLed(mode,20); //Calls function which flashes the mode LED with a certain delay
+      
+      if (Serial.available() > 0){
+        int inputSerial = Serial.read();
+        Serial.println(inputSerial);
+        if (inputSerial == 3){
+          delay(100); //Makes sure that all the coordinates are in the buffer
+          long byteaR = Serial.read();
+          long bytebR = Serial.read();
+          long bytecR = Serial.read();
+          long bytedR = Serial.read();
+          long byteeR = Serial.read();
+          long bytefR = Serial.read();
+          long bytegR = Serial.read();
+          long bytehR = Serial.read();
+          long byteiR = Serial.read();
+          long xCord = (((byteaR)*256*256)+(bytebR*256)+(bytecR));
+          long yCord = (((bytedR)*256*256)+(byteeR*256)+(bytefR));
+          long zCord = (((bytegR)*256*256)+(bytehR*256)+(byteiR));
+          Serial.println(xCord);
+          Serial.println(yCord);
+          Serial.println(zCord);
+          while(1==1){
+            flashLed(mode,100);
+          }
+        }
+      }
+    }
+  }
+
+  
+  else if (mode == 2){
+    while(1==1){
+      Serial.write(2); //2 tells the main base that base 2 is ready for coordinates
+      flashLed(mode,200); //Calls function which flashes the mode LED with a certain delay
+    }
+  }
+
+
+
+
+
+  //If mode is 0
+  else if (mode == 0){
+
+    //Check if both bases are ready
+    int readyToSendTo1 = 0; //becomes 1 when both bases are ready to recieve the coordinate
+    int readyToSendTo2 = 0;
+    
+    while(readyToSendTo1 == 0){//or (readyToSendTo2 == 0)){
+      if (Serial.available() > 0){
+        int inputSerial = Serial.read();
+        Serial.println(inputSerial);
+        if (inputSerial == 1){
+          readyToSendTo1 = 1;
+        }
+        if (inputSerial == 2){
+          readyToSendTo2 = 1;
+        }
+      }
+      
+      flashLed(mode,200); //Yellow LED Tells us its waiting for the other bases to be ready
+      
+      if (readyToSendTo1 ==1){ //Flash Red(base 1) and Green(base 2) LEDs on main base (0) to tell us if the other bases are ready
+        flashLed(1,5);
+      }
+      if (readyToSendTo2 ==1){
+        flashLed(2,5);
+      }   
+    }
+
+
+
+    //Let user know that the main base is about to send coordinate
+    Serial.print("Ready to send coordinate, Yaaayyyy");
+    for (int i = 0; i <= 10; i++) { //Cycle the LEDS so we know when that the coordinates are about to be sent
+      flashLed(0,50);
+      flashLed(1,50);
+      flashLed(2,50);
+    }
+
+
+    //Send Coordinate to base 1 and 2
+    
+    flashLed(0,50);
+    flashLed(1,50);
+    flashLed(2,50);
+    Serial.write(3); // Send ready to listen signal. When a three is send to the sub bases they know to read the next set if bytes to get the values for the coordinates
+
+    //Sends 3 bytes, meaning the value of length can be up to 16,777,216
+    sendCoordinates(1000,500,10);
+  }
+
+
+
+
+
+
+  
+  delay(1000000);
+
+  xStepSpacing = (newXCord - currentXCord) / stepCount; //Divide the total distance to be covered by the number of segments it is to be split up into
+  yStepSpacing = (newYCord - currentYCord) / stepCount;
+  zStepSpacing = (newZCord - currentZCord) / stepCount;
+
+  //Calculate all of the x,y and z cordinates between the two points
+  for (int i = 0; i <= stepCount; i++) { 
+    xJourneyCords[i] = currentXCord + (i*xStepSpacing);
+    yJourneyCords[i] = currentYCord + (i*yStepSpacing);
+    zJourneyCords[i] = currentZCord + (i*zStepSpacing);
+    
+    Serial.print(xJourneyCords[i]);
+    Serial.print(" ");
+    Serial.print(yJourneyCords[i]);
+    Serial.print(" ");
+    Serial.print(zJourneyCords[i]);
+    Serial.println();
+  }
+  Serial.println();
+
+  //Calculate all journey lengths
+  for (int i = 0; i <= stepCount; i++) {
+    journeyLengths[i] = Pythag(xJourneyCords[i],yJourneyCords[i],zJourneyCords[i],0,0,0);
+    Serial.println(journeyLengths[i]);
+  }
+  Serial.println();
+
+  
+  //Calculate all motor step positions
+  for (int i = 0; i <= stepCount; i++) {
+    stepPositions[i] = calcStepPosition(journeyLengths[i]);
+    Serial.println(stepPositions[i]);
+  }
+
+  for (int i = 1; i <= stepCount; i++) {
+    driveMotor(stepPositions[i-1],stepPositions[i],i);
+    Serial.println(i);
+  }
+
+
+  
+}
+
+void loop(){
+  
+}
+
+
+
+
+
+
+
+
+
+
+void sendCoordinates(long xCoord, long yCoord, long zCoord){
+  //Calculating xCord
+  int bytea = (int)(xCoord/65536);
+  int byteb = (int)((xCoord%(65536))/256);
+  int bytec = (int)((xCoord%(65536))%256);
+
+  //Calculating yCord
+  int byted = (int)(yCoord/65536);
+  int bytee = (int)((yCoord%(65536))/256);
+  int bytef = (int)((yCoord%(65536))%256);
+
+  //Calculating zCord
+  int byteg = (int)(zCoord/65536);
+  int byteh = (int)((zCoord%(65536))/256);
+  int bytei = (int)((zCoord%(65536))%256);
+    
+  Serial.write(bytea);
+  Serial.write(byteb);
+  Serial.write(bytec);
+  Serial.write(byted);
+  Serial.write(bytee);
+  Serial.write(bytef);
+  Serial.write(byteg);
+  Serial.write(byteh);
+  Serial.write(bytei);
+}
+
+
+
+//Choosing mode function
+int chooseMode(){
+  int chosenMode;
+  while(1==1){  //This will loop around if no mode is chosen
+    if (digitalRead(mode0Input) == HIGH){
+      digitalWrite(yellowLed, HIGH);
+      chosenMode = 0;
+      return(chosenMode);
+    }
+    else if (digitalRead(mode1Input) == HIGH){
+      digitalWrite(redLed, HIGH);
+      chosenMode = 1;
+      return(chosenMode);
+    }
+    else if (digitalRead(mode2Input) == HIGH){
+      digitalWrite(greenLed, HIGH);
+      chosenMode = 2;
+      return(chosenMode);
+    }
+    else{ //All the lights flash if no mode is chosen
+      digitalWrite(yellowLed, HIGH);
+      digitalWrite(redLed, HIGH);
+      digitalWrite(greenLed, HIGH);
+      delay(250);
+      digitalWrite(yellowLed, LOW);
+      digitalWrite(redLed, LOW);
+      digitalWrite(greenLed, LOW);
+      delay(250);
+    }
+  }
+}
+
+void flashLed(int LED, int durationDelay){
+  if (LED == 0){
+    digitalWrite(yellowLed, HIGH);
+    delay(durationDelay);
+    digitalWrite(yellowLed, LOW);
+    delay(durationDelay);
+  }
+  else if (LED == 1){
+    digitalWrite(redLed, HIGH);
+    delay(durationDelay);
+    digitalWrite(redLed, LOW);
+    delay(durationDelay);
+  }
+  else if (LED == 2){
+    digitalWrite(greenLed, HIGH);
+    delay(durationDelay);
+    digitalWrite(greenLed, LOW);
+    delay(durationDelay);
+  }
+  
+  
+      
+   
+}
+
+
+
+
+//This function calculates the length of the string based on the jelly fish position and the base position
+float Pythag(float xCord,float yCord,float zCord,float xBase,float yBase,float zBase){
+  float result = sqrt(sq(xCord-xBase)+sq(yCord-yBase)+sq(zCord-zBase));
+  return(result);
+}
+
+//This function is given the length of the string (mm) as a float and then calculates the coresponding step position of the motor
+long calcStepPosition(float stLength){
+  //Serial.println(stLength,10);
+  float noOfRotations = stLength / spoolCircumference; //Divide Length by Circumference
+  //Serial.println(noOfRotations,10);
+  float noOfMotRotations = noOfRotations * gearRatio; //Multiply by gear ratio
+  //Serial.println(noOfMotRotations,10);
+  long stepPosition = (long) (noOfMotRotations * stepsInRev); //Multiply by number of steps, round down to nearest integer as can't have half step/ 
+ return (stepPosition);
+}
+
+
+
+//Motor Drive Function
+void driveMotor(long startStepPosition, long endStepPosition, float durationSeconds){
+  long changeInSteps = endStepPosition - startStepPosition; //Calculate the change in steps needed to get to the new position
+  float durationMicroseconds = durationSeconds*1000000; //Convert to microseconds ready for the motor delay
+
+  
+  if (changeInSteps < 0){ //Set Direction of the motor
+    digitalWrite(dirPin,LOW); //Make motor turn backwards
+  }
+  else{
+    digitalWrite(dirPin,HIGH); 
+  }
+
+  long changeInStepsMod = abs(changeInSteps);
+
+  //The time for step is the delay between each step pulse sent to the motor
+  float timeForStep = ((durationMicroseconds/changeInStepsMod)/2); //Divided by two because there is a high and a low pulse
+
+  int var = 0;
+  while(var < changeInStepsMod){ //Send the required number of pulses to the motor with the calculated delay
+    digitalWrite(stepPin,HIGH);
+    delayMicroseconds(timeForStep);
+    digitalWrite(stepPin,LOW);
+    delayMicroseconds(timeForStep);
+    var++;
+  }
+}
